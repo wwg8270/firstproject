@@ -1,0 +1,72 @@
+set hive.exec.parallel=true;
+set mapred.job.priority=HIGH;
+set mapred.job.name=Hive:[pc_lm][${FUNCNAME[0]}][test][lihaixin];
+ 
+select
+  ls
+  , ctype
+  , req_num -- 请求数
+  , tag_view --展现数
+  , bid_num -- 竞价数
+  , bid_succ -- 竞价成功数(反前)
+  , bid_succ_nospam -- 竞价成功数(反后)
+  , click -- 一跳点击(反前)
+  , click_nospam -- 一跳点击(反后)
+  , 2_click -- 二跳点击
+  , if(click>0, 2_click/click_nospam, 0.0) 2_click_ctr -- 二跳点击率
+  , cost -- 广告收入
+  , pay --dsp支出(反前)
+  , pay_nospam --dsp支出(反后)
+  , accum_pay --dsp累计出价
+  , bid_num/req_num --竞价率
+  , if(bid_num>0, bid_succ/bid_num, 0.0) as bid_succ_rate --竞价成功率
+  , if (pay>0, cost/pay, 0.0) as ysb -- 营收比
+from
+(
+  select
+    ls
+    , ctype
+    , count(*) as req_num -- 请求数
+    , sum(pv_view) as tag_view --展现数
+    , sum(pv_bid_num) as bid_num -- 竞价数
+    , SUM(pv_bid_succ) as bid_succ --竞价成功数(反前)
+    , SUM(pv_bid_succ_nospam) as bid_succ_nospam --竞价成功数(反后)
+    , sum(pv_click) as click -- 一跳点击(反前)
+    , sum(pv_click_nospam) as click_nospam -- 一跳点击(反后)
+    , sum(pv_2_click) as 2_click -- 二跳点击(反前)
+    , sum(pv_cost) as cost --广告收入
+    , sum(pv_pay)/1000000000.0 as pay --dsp支出(反前)
+    , sum(pv_pay_nospam)/1000000000.0 as pay_nospam --dsp支出(反后)
+    , sum(pv_accum_pay)/1000000000.0 as accum_pay --dsp累计出价
+  from
+  (
+    select
+      ctag as ls
+      , ctype
+      , lmid
+      , SUM(if(is_view='1', 1, 0)) as pv_view --pv粒度展现数
+      , SUM(if(ad_bid_price>0, 1, 0)) as pv_bid_num --pv粒度竞价数
+ 
+      , SUM(if(ad_win_price>0 and is_view='1', 1, 0)) as pv_bid_succ --pv粒度竞价成功数(反前)
+      , SUM(if(ad_win_price>0 and is_view='1' and (is_spam_pv='' or is_spam_pv='0') and (is_spam_click='' or is_spam_click='0'), 1, 0)) as pv_bid_succ_nospam --pv粒度价成功数(反后)
+ 
+      , SUM(if(is_click='1', 1, 0)) as pv_click --pv粒度一跳点击(反前)
+      , SUM(if(is_click='1' and (is_spam_pv='' or is_spam_pv='0') and (is_spam_click='' or is_spam_click='0'), 1, 0)) as pv_click_nospam --pv粒度一跳点击(反后)
+ 
+      , SUM(so_ad_click_cnt) as pv_2_click --pv粒度二跳点击(反前)
+      , SUM(so_ad_cost) as pv_cost
+ 
+      , MAX(if(ad_win_price>0 and is_view='1', ad_win_price, 0)) as pv_pay
+      , MAX(if(ad_win_price>0 and is_view='1' and (is_spam_pv='' or is_spam_pv='0') and (is_spam_click='' or is_spam_click='0'), ad_win_price, 0)) as pv_pay_nospam
+ 
+      , MAX(if(ad_bid_price>0, ad_bid_price, 0)) as pv_accum_pay --累计出价
+    from hdp_unionad.pc_dsp_join_log
+    where
+      day in ('20190307')
+      and ctype in ('21', '22', '23', '24', '25', '26')
+      and ctag in ('sn1161100', 'sn1159715', 'sn1450229')
+    group by ctag, ctype, lmid
+  ) t1
+  group by ls, ctype
+) t2
+;
